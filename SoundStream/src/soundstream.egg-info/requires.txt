@@ -1,0 +1,5 @@
+aiortc
+sounddevice
+aiohttp
+numpy
+prompt_toolkit

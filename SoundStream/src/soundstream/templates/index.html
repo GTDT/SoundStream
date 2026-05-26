@@ -1,0 +1,170 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SoundStream Web GUI</title>
+    <style>
+      /* Basic layout and styling for the web UI panels */
+      body { font-family: Arial, sans-serif; margin: 24px; color: #111; }
+      h1 { margin-bottom: 12px; }
+      .card { border: 1px solid #ccc; border-radius: 8px; padding: 16px; margin-bottom: 16px; }
+      .row { display: flex; flex-wrap: wrap; gap: 12px; align-items: center; }
+      label { display: block; margin-top: 8px; }
+      input, select { width: 100%; max-width: 320px; padding: 8px; margin-top: 4px; }
+      button { padding: 10px 16px; border: none; border-radius: 6px; background: #0066cc; color: white; cursor: pointer; }
+      button:hover { background: #004d99; }
+      pre { background: #f5f5f5; padding: 12px; border-radius: 8px; overflow-x: auto; }
+      .small { font-size: 0.92rem; color: #555; }
+    </style>
+  </head>
+  <body>
+    <h1>SoundStream Web GUI</h1>
+
+    <!-- Status panel: shows current session state and room info -->
+    <div class="card">
+      <h2>Status</h2>
+      <button id="refresh-status">Refresh</button>
+      <pre id="status-output">Loading...</pre>
+    </div>
+
+    <!-- Stream panel: form to create a room and start mic streaming -->
+    <div class="card">
+      <h2>Stream</h2>
+      <form id="stream-form">
+        <label>Room ID<input name="room_id" required placeholder="room-name" /></label>
+        <label>Input device index<input name="device" type="number" placeholder="optional" /></label>
+        <label><input name="is_public" type="checkbox" /> Public room</label>
+        <label>Title<input name="title" placeholder="optional" /></label>
+        <button type="submit">Start Streaming</button>
+      </form>
+    </div>
+
+    <!-- Listen panel: form to join a room and play audio -->
+    <div class="card">
+      <h2>Listen</h2>
+      <form id="listen-form">
+        <label>Room ID<input name="room_id" required placeholder="room-name" /></label>
+        <label>Output device index<input name="device" type="number" placeholder="optional" /></label>
+        <button type="submit">Start Listening</button>
+      </form>
+    </div>
+
+    <!-- Controls panel: stop session and refresh public room list -->
+    <div class="card">
+      <h2>Controls</h2>
+      <button id="stop-button">Stop Session</button>
+      <button id="refresh-rooms">Refresh Public Rooms</button>
+      <div id="rooms-output" class="small">Public room list is empty.</div>
+    </div>
+
+    <!-- Device list panel: displays available audio I/O devices -->
+    <div class="card">
+      <h2>Device List</h2>
+      <button id="refresh-devices">Refresh Devices</button>
+      <pre id="devices-output">Loading...</pre>
+    </div>
+
+    <script>
+      /**
+       * Generic wrapper for calling the Flask backend API.
+       * Throws on non-OK responses so callers can catch and display errors.
+       */
+      async function api(path, options = {}) {
+        const res = await fetch(path, options);
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Request failed');
+        return data;
+      }
+
+      /** Fetch current session state and render it as pretty-printed JSON. */
+      async function refreshStatus() {
+        try {
+          const status = await api('/api/status');
+          document.getElementById('status-output').textContent = JSON.stringify(status, null, 2);
+        } catch (err) {
+          document.getElementById('status-output').textContent = err.message;
+        }
+      }
+
+      /** Fetch the list of audio devices and render them. */
+      async function refreshDevices() {
+        try {
+          const { devices } = await api('/api/devices');
+          document.getElementById('devices-output').textContent = JSON.stringify(devices, null, 2);
+        } catch (err) {
+          document.getElementById('devices-output').textContent = err.message;
+        }
+      }
+
+      /** Fetch public rooms from the server and display them. */
+      async function refreshRooms() {
+        try {
+          const { rooms } = await api('/api/rooms');
+          document.getElementById('rooms-output').textContent = rooms.length
+            ? rooms.map(r => `${r.room_id} (${r.listener_count}/${r.listener_cap})`).join('\n')
+            : 'No public rooms available.';
+        } catch (err) {
+          document.getElementById('rooms-output').textContent = err.message;
+        }
+      }
+
+      /** Handle stream form submission: POST to /api/stream. */
+      document.getElementById('stream-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        const payload = {
+          room_id: form.room_id.value,
+          device: form.device.value ? Number(form.device.value) : undefined,
+          is_public: form.is_public.checked,
+          title: form.title.value || undefined,
+        };
+        try {
+          await api('/api/stream', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          await refreshStatus();
+          alert('Streaming started');
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      /** Handle listen form submission: POST to /api/listen. */
+      document.getElementById('listen-form').addEventListener('submit', async (event) => {
+        event.preventDefault();
+        const form = event.target;
+        const payload = {
+          room_id: form.room_id.value,
+          device: form.device.value ? Number(form.device.value) : undefined,
+        };
+        try {
+          await api('/api/listen', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(payload) });
+          await refreshStatus();
+          alert('Listening started');
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      /** Handle stop button click: POST to /api/stop. */
+      document.getElementById('stop-button').addEventListener('click', async () => {
+        try {
+          await api('/api/stop', { method: 'POST' });
+          await refreshStatus();
+          alert('Session stopped');
+        } catch (err) {
+          alert(err.message);
+        }
+      });
+
+      // Wire up manual refresh buttons.
+      document.getElementById('refresh-status').addEventListener('click', refreshStatus);
+      document.getElementById('refresh-devices').addEventListener('click', refreshDevices);
+      document.getElementById('refresh-rooms').addEventListener('click', refreshRooms);
+
+      // Populate all panels on initial page load.
+      refreshStatus();
+      refreshDevices();
+      refreshRooms();
+    </script>
+  </body>
+</html>
